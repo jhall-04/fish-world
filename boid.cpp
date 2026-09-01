@@ -4,8 +4,8 @@
 #include <cmath>
 #include <random>
 
-#define SCREEN_WIDTH 800
-#define SCREEN_HEIGHT 600
+#define SCREEN_WIDTH 1000
+#define SCREEN_HEIGHT 800
 
 
 struct Boid {
@@ -23,14 +23,14 @@ struct Flock {
 void drawBoid(const Boid &boid) {
     float angle = std::atan2(boid.vy, boid.vx);
     DrawTriangle(
-        {boid.x + 8 * std::cos(angle), boid.y + 8 * std::sin(angle)},
-        {boid.x + 4 * std::cos(angle - 2.5f), boid.y + 4 * std::sin(angle - 2.5f)},
-        {boid.x + 4 * std::cos(angle + 2.5f), boid.y + 4 * std::sin(angle + 2.5f)},
+        {boid.x + 10 * std::cos(angle), boid.y + 10 * std::sin(angle)},
+        {boid.x + 6 * std::cos(angle - 2.5f), boid.y + 6 * std::sin(angle - 2.5f)},
+        {boid.x + 6 * std::cos(angle + 2.5f), boid.y + 6 * std::sin(angle + 2.5f)},
         PINK
     );
 }
 
-Vector2 updateBoidVelocity(const Boid &boid, const Flock &flock, float interactionRadius, float attractionStrength, float repulsionStrength, float velocityAlignmentStrength, float maxSpeed) {
+Vector2 updateBoidVelocity(const Boid &boid, const Flock &flock, float interactionRadius, float attractionStrength, float repulsionStrength, float velocityAlignmentStrength, float maxSpeed, float minSpeed) {
     float cx = 0.0f;
     float cy = 0.0f;
     float count = 0.0f;
@@ -69,6 +69,28 @@ Vector2 updateBoidVelocity(const Boid &boid, const Flock &flock, float interacti
         avgVy = sumVy / count;
         vx += velocityAlignmentStrength * (avgVx - vx);
         vy += velocityAlignmentStrength * (avgVy - vy);
+        if (vx * vx + vy * vy > maxSpeed * maxSpeed) {
+            float speed = std::sqrt(vx * vx + vy * vy);
+            vx = (vx / speed) * maxSpeed;
+            vy = (vy / speed) * maxSpeed;
+        } else if (vx * vx + vy * vy < minSpeed * minSpeed) {
+            float speed = std::sqrt(vx * vx + vy * vy);
+            vx = (vx / speed) * minSpeed;
+            vy = (vy / speed) * minSpeed;
+        }
+    }
+    // Wall avoidance ramps up smoothly and remains bounded at the screen edge.
+    constexpr float wallMargin = 20.0f;
+    constexpr float wallTurnStrength = 0.5f;
+    if (boid.x > SCREEN_WIDTH - wallMargin) {
+        vx -= wallTurnStrength * (boid.x - (SCREEN_WIDTH - wallMargin)) / wallMargin;
+    } else if (boid.x < wallMargin) {
+        vx += wallTurnStrength * (wallMargin - boid.x) / wallMargin;
+    }
+    if (boid.y > SCREEN_HEIGHT - wallMargin) {
+        vy -= wallTurnStrength * (boid.y - (SCREEN_HEIGHT - wallMargin)) / wallMargin;
+    } else if (boid.y < wallMargin) {
+        vy += wallTurnStrength * (wallMargin - boid.y) / wallMargin;
     }
     return {vx, vy};
 }
@@ -84,29 +106,30 @@ int main() {
     std::uniform_int_distribution<int> dis_height(0, SCREEN_HEIGHT);
 
     float velocity = 3.0f;
-    float interactionRadius = 50;
-    float attractionStrength = 0.01f;
-    float repulsionStrength = 0.6f;
-    float velocityAlignmentStrength = 0.05f;
-    float maxSpeed = 5.0f;
+    float interactionRadius = 30;
+    float attractionStrength = 0.005f;
+    float repulsionStrength = 0.9f;
+    float velocityAlignmentStrength = 0.02f;
+    float maxSpeed = 6.0f;
+    float minSpeed = 1.0f;
 
 
     Flock flock;
-    for (int i = 0; i < 50; ++i) {
+    for (int i = 0; i < 500; ++i) {
         float a = dis_angle(gen);
         flock.boids.push_back(Boid(dis_width(gen), dis_height(gen), velocity * std::cos(a), velocity * std::sin(a)));
     }
 
     while (!WindowShouldClose()) {
         BeginDrawing();
-        ClearBackground(RAYWHITE);
+        ClearBackground(DARKBLUE);
         for (auto &boid : flock.boids) {
             drawBoid(boid);
         }
         EndDrawing();
         std::vector<Vector2> newVelocities;
         for (auto &boid : flock.boids) {
-            newVelocities.push_back(updateBoidVelocity(boid, flock, interactionRadius, attractionStrength, repulsionStrength, velocityAlignmentStrength, maxSpeed));
+            newVelocities.push_back(updateBoidVelocity(boid, flock, interactionRadius, attractionStrength, repulsionStrength, velocityAlignmentStrength, maxSpeed, minSpeed));
         }
         for (size_t i = 0; i < flock.boids.size(); ++i) {
             flock.boids[i].vx = newVelocities[i].x;
