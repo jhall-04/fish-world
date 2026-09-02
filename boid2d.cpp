@@ -109,13 +109,13 @@ int main() {
     float interactionRadius = 30;
     float attractionStrength = 0.005f;
     float repulsionStrength = 0.9f;
-    float velocityAlignmentStrength = 0.02f;
+    float velocityAlignmentStrength = 0.05f;
     float maxSpeed = 6.0f;
     float minSpeed = 1.0f;
 
 
     Flock flock;
-    for (int i = 0; i < 500; ++i) {
+    for (int i = 0; i < 4000; ++i) {
         float a = dis_angle(gen);
         flock.boids.push_back(Boid(dis_width(gen), dis_height(gen), velocity * std::cos(a), velocity * std::sin(a)));
     }
