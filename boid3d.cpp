@@ -56,7 +56,7 @@ Vector3 vector3Normalize(Vector3 v) {
 }
 
 float angleBetweenVectors(Vector3 a, Vector3 b) {
-    float dot = Vector3Dot(a, b);
+    float dot = Vector3DotProduct(a, b);
     float lengths = Vector3Length(a) * Vector3Length(b);
     if (lengths > 1e-5f) {
         return acosf(dot / lengths);
@@ -100,7 +100,11 @@ Vector3 updateBoidVelocity(const Boid &boid, const Flock &flock) {
         repulsion.x /= repulsionCount;
         repulsion.y /= repulsionCount;
         repulsion.z /= repulsionCount;
-        
+        angle = angleBetweenVectors({ boid.vx, boid.vy, boid.vz }, repulsion);
+        if (angle > max_turn_angle) {
+            Vector3 cross = Vector3CrossProduct({ boid.vx, boid.vy, boid.vz }, repulsion);
+            
+        }
     }
     if (orientationCount > 0) {
         orientation = vector3Normalize(orientation);
