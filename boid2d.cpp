@@ -1,8 +1,12 @@
-#include <iostream>
 #include <vector>
 #include "raylib.h"
 #include <cmath>
 #include <random>
+#include <algorithm>
+
+#if defined(PLATFORM_WEB)
+    #include <emscripten/emscripten.h>
+#endif
 
 #define SCREEN_WIDTH 1000
 #define SCREEN_HEIGHT 800
@@ -20,6 +24,18 @@ struct Flock {
     std::vector<Boid> boids;
 };
 
+// Everything the frame callback needs, since it can't rely on main()'s stack.
+struct AppState {
+    Flock flock;
+    std::vector<Vector2> newVelocities;
+    float interactionRadius;
+    float attractionStrength;
+    float repulsionStrength;
+    float velocityAlignmentStrength;
+    float maxSpeed;
+    float minSpeed;
+};
+
 void drawBoid(const Boid &boid) {
     float angle = std::atan2(boid.vy, boid.vx);
     DrawTriangle(
@@ -28,6 +44,25 @@ void drawBoid(const Boid &boid) {
         {boid.x + 6 * std::cos(angle + 2.5f), boid.y + 6 * std::sin(angle + 2.5f)},
         PINK
     );
+}
+
+float Slider(Rectangle bounds, const char *label, float value, float minVal, float maxVal, bool *anySliderActive) {
+    Vector2 mouse = GetMousePosition();
+    bool hovered = CheckCollisionPointRec(mouse, bounds);
+
+    if (hovered && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+        float t = (mouse.x - bounds.x) / bounds.width;
+        value = minVal + std::clamp(t, 0.0f, 1.0f) * (maxVal - minVal);
+        *anySliderActive = true;
+    }
+
+    DrawRectangleRec(bounds, Fade(WHITE, 0.15f));
+    float fillW = bounds.width * (value - minVal) / (maxVal - minVal);
+    DrawRectangle((int)bounds.x, (int)bounds.y, (int)fillW, (int)bounds.height, Fade(SKYBLUE, 0.6f));
+    DrawRectangle((int)(bounds.x + fillW - 3), (int)bounds.y - 2, 6, (int)bounds.height + 4, WHITE);
+    DrawText(TextFormat("%s: %.1f", label, value), (int)bounds.x, (int)bounds.y - 18, 16, WHITE);
+
+    return value;
 }
 
 Vector2 updateBoidVelocity(const Boid &boid, const Flock &flock, float interactionRadius, float attractionStrength, float repulsionStrength, float velocityAlignmentStrength, float maxSpeed, float minSpeed) {
@@ -95,55 +130,85 @@ Vector2 updateBoidVelocity(const Boid &boid, const Flock &flock, float interacti
     return {vx, vy};
 }
 
+// One frame: draw, then integrate. Called by the browser via requestAnimationFrame
+// on web, and by a plain while loop on desktop.
+void UpdateDrawFrame(void *arg) {
+    AppState *state = (AppState *)arg;
+    Flock &flock = state->flock;
+
+    float sw = (float)GetScreenWidth();
+    float sh = (float)GetScreenHeight();
+    bool sliderActive = false;
+
+    BeginDrawing();
+    ClearBackground(DARKBLUE);
+    for (auto &boid : flock.boids) {
+        drawBoid(boid);
+    }
+    state->repulsionStrength = Slider({ sw - 220, sh - 110, 200, 12 }, "Repulsion Range", state->repulsionStrength, 0.0f, 2.0f, &sliderActive);
+    state->attractionStrength = Slider({ sw - 220, sh - 40, 200, 12 }, "Attraction Range", state->attractionStrength, 0.0f, 0.01f, &sliderActive);
+    state->velocityAlignmentStrength = Slider({ sw - 220, sh - 75, 200, 12 }, "Velocity Alignment", state->velocityAlignmentStrength, 0.0f, 0.1f, &sliderActive);
+    EndDrawing();
+
+    state->newVelocities.clear();
+    for (auto &boid : flock.boids) {
+        state->newVelocities.push_back(updateBoidVelocity(boid, flock, state->interactionRadius, state->attractionStrength, state->repulsionStrength, state->velocityAlignmentStrength, state->maxSpeed, state->minSpeed));
+    }
+    for (size_t i = 0; i < flock.boids.size(); ++i) {
+        flock.boids[i].vx = state->newVelocities[i].x;
+        flock.boids[i].vy = state->newVelocities[i].y;
+    }
+    for (auto &boid : flock.boids) {
+        boid.x += boid.vx;
+        boid.y += boid.vy;
+        if (boid.x > SCREEN_WIDTH) boid.x = 0;
+        if (boid.y > SCREEN_HEIGHT) boid.y = 0;
+        if (boid.x < 0) boid.x = SCREEN_WIDTH;
+        if (boid.y < 0) boid.y = SCREEN_HEIGHT;
+    }
+}
+
+// Static so its lifetime outlives main() when the browser owns the loop.
+static AppState state;
+
+#if defined(PLATFORM_WEB)
+// Called from JS when the React component unmounts.
+extern "C" EMSCRIPTEN_KEEPALIVE void StopSim(void) {
+    emscripten_cancel_main_loop();
+    CloseWindow();
+}
+#endif
 
 int main() {
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "boids");
-    SetTargetFPS(60);
-    std::random_device rd;
-    std::mt19937 gen(rd());
+
+    std::mt19937 gen(std::random_device{}());
     std::uniform_real_distribution<float> dis_angle(0.0f, 2.0f * PI);
     std::uniform_int_distribution<int> dis_width(0, SCREEN_WIDTH);
     std::uniform_int_distribution<int> dis_height(0, SCREEN_HEIGHT);
 
     float velocity = 3.0f;
-    float interactionRadius = 30;
-    float attractionStrength = 0.005f;
-    float repulsionStrength = 0.9f;
-    float velocityAlignmentStrength = 0.05f;
-    float maxSpeed = 6.0f;
-    float minSpeed = 1.0f;
+    state.interactionRadius = 30.0f;
+    state.attractionStrength = 0.005f;
+    state.repulsionStrength = 0.9f;
+    state.velocityAlignmentStrength = 0.05f;
+    state.maxSpeed = 6.0f;
+    state.minSpeed = 1.0f;
 
-
-    Flock flock;
-    for (int i = 0; i < 4000; ++i) {
+    for (int i = 0; i < 500; ++i) {
         float a = dis_angle(gen);
-        flock.boids.push_back(Boid(dis_width(gen), dis_height(gen), velocity * std::cos(a), velocity * std::sin(a)));
+        state.flock.boids.push_back(Boid(dis_width(gen), dis_height(gen), velocity * std::cos(a), velocity * std::sin(a)));
     }
+    state.newVelocities.reserve(state.flock.boids.size());
 
+#if defined(PLATFORM_WEB)
+    emscripten_set_main_loop_arg(UpdateDrawFrame, &state, 0, 1);
+#else
+    SetTargetFPS(60);
     while (!WindowShouldClose()) {
-        BeginDrawing();
-        ClearBackground(DARKBLUE);
-        for (auto &boid : flock.boids) {
-            drawBoid(boid);
-        }
-        EndDrawing();
-        std::vector<Vector2> newVelocities;
-        for (auto &boid : flock.boids) {
-            newVelocities.push_back(updateBoidVelocity(boid, flock, interactionRadius, attractionStrength, repulsionStrength, velocityAlignmentStrength, maxSpeed, minSpeed));
-        }
-        for (size_t i = 0; i < flock.boids.size(); ++i) {
-            flock.boids[i].vx = newVelocities[i].x;
-            flock.boids[i].vy = newVelocities[i].y;
-        }
-        for (auto &boid : flock.boids) {
-            boid.x += boid.vx; // Move the circle to the right each frame
-            boid.y += boid.vy; // Move the circle down each frame
-            if (boid.x > SCREEN_WIDTH) boid.x = 0;
-            if (boid.y > SCREEN_HEIGHT) boid.y = 0;
-            if (boid.x < 0) boid.x = SCREEN_WIDTH;
-            if (boid.y < 0) boid.y = SCREEN_HEIGHT;
-        }
+        UpdateDrawFrame(&state);
     }
+#endif
 
     CloseWindow();
     return 0;
